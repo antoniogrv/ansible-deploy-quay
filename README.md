@@ -9,7 +9,7 @@ Questa repository descrive come installare e configurare il container registry [
 - [Esempio d'uso](#esempio-duso)
 - [Preparazione di una release](#preparazione-di-una-release)
 
-> [!CAUTION]
+> [!WARNING]
 > La macchina virtuale dovrebbe avere *almeno* 2 vCPU, 4 GB di RAM e 20+ GB di spazio libero su disco. Inoltre, le istruzioni presuppongono che il nodo monti una distribuzione vergine di [Ubuntu 22.04 Live Server](https://releases.ubuntu.com/jammy/ubuntu-22.04.4-live-server-amd64.iso).
 
 La presente installazione ha l'obiettivo di distribuire Quay in "modalità di sviluppo" (i.e. non production-ready). Ciò significa che la configurazione che segue *non* si conforma ai requisiti tipici di un ambiente di produzione. Inoltre, si sottolinea che questo specifico branch di questa repository utilizza versioni particolari delle dipendenze di Quay. Utilizzare un branch diverso, se disponibile, in base alle proprie esigenze.
@@ -94,8 +94,7 @@ tar -xvf download.tar -C deps
 
     **a.** Sulla macchina locale, eseguire `git clone https://github.com/quay/quay.git` ed accedere alla directory `quay`
 
-    > [!IMPORTANT]
-    > Se si è su macchina locale Windows, accertarsi di eseguire i successivi comandi su terminale WSL, altrimenti le immagine create conterranno delle malformazioni che impediranno la corretta esecuzione dei container
+    > **Attenzione.** Se si è su macchina locale Windows, accertarsi di eseguire i successivi comandi su terminale WSL, altrimenti le immagine create conterranno delle malformazioni che impediranno la corretta esecuzione dei container
 
     **a.** Quay e i suoi servizi accessori sono distribuiti mediante container Docker. L'esecuzione dei servizi è delegata ad un [Makefile](https://github.com/quay/quay/blob/master/Makefile), che a sua volta richiama un [docker-compose.yaml](https://github.com/quay/quay/blob/master/docker-compose.yaml)
 
@@ -115,8 +114,7 @@ tar -xvf download.tar -C deps
 
     **c.** Dalla macchina virtuale target, per ognuna delle cinque immagini, eseguire `sudo docker load -i [nome file]`. Dopo ogni caricamento, verificare le immagini con `sudo docker images`: dovrebbero risultare senza nome né tag. Di conseguenza, prima di caricare la successiva immagine, sarà necessario taggare opportunamente l'immagine avendo cura di prelevare prima l'identificato della stessa. Le immagini dovranno essere così taggate:
 
-    > [!NOTE]
-    > Le versioni delle immagini indicate nei seguenti tag potrebbero non corrispondere a quelle effettivamente presenti sul `docker-compose.yaml` relativo alla release di Quay selezionata dal branch Git.
+    > **Attenzione.**Le versioni delle immagini indicate nei seguenti tag potrebbero non corrispondere a quelle effettivamente presenti sul `docker-compose.yaml` relativo alla release di Quay selezionata dal branch Git.
 
     -  `sudo docker tag <image id di quay-local> localhost/quay-local:latest`
     -  `sudo docker tag <image id di quay-build> localhost/quay-build:latest`
