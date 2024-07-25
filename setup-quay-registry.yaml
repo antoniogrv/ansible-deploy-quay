@@ -1,0 +1,203 @@
+# Pre-requisiti per il control plane:
+# - Una directory /deps così come distribuita nelle release
+
+# Pre-requisiti per i nodi: 
+# - Python 3.x, 
+# - Un account "admin" sul nodo (nel gruppo sudo) e la presenza della directory /home/admin
+# - La chiave pubblica del control plane in /home/admin/.ssh/authorized_keys
+
+- name: Distribuzione di Quay
+  hosts: quay_nodes
+  vars:
+    openssl_cnf_ip: "{{ ansible_host }}"
+    openssl_cnf_dns: "{{ hostvars[inventory_hostname].domain_name }}"
+  remote_user: admin
+  tasks:
+
+    # Trasferimento e installazione delle dipendenze
+
+    - name: Configurazione OpenSSL
+      ansible.builtin.debug:
+        msg: "Configurazione OpenSSL - IP.1: {{ openssl_cnf_ip }}; DNS.1: {{ openssl_cnf_dns }}"
+
+    - name: Creazione del gruppo Docker, se non esistente
+      ignore_errors: true
+      become: true
+      ansible.builtin.shell: sudo groupadd docker
+    - name: Aggiunta dell'utente del playbook nel gruppo Docker
+      become: true
+      ansible.builtin.user:
+        name: admin
+        groups: docker
+        append: true
+    - name: Reset della connessione SSH per applicare i cambiamenti
+      ansible.builtin.meta:
+        reset_connection
+
+    - name: Trasferimento di Docker
+      register: docker_transfer
+      ansible.builtin.copy:
+        src: "{{ item }}"
+        dest: /home/admin/docker/
+        force: no
+      loop:
+        # Per le specifiche versioni dei seguenti file, consultare la documentazione
+        - deps/docker/docker-ce.deb
+        - deps/docker/docker-ce-cli.deb
+        - deps/docker/containerd.io.deb
+        - deps/docker/docker-compose
+    - name: Installazione delle dipendenze di Docker
+      when: docker_transfer.changed
+      become: true
+      ansible.builtin.shell: |
+        dpkg -i /home/admin/docker/*.deb
+        cp /home/admin/docker/docker-compose /usr/local/bin/docker-compose
+        chmod +x /usr/local/bin/docker-compose
+
+    # Trasferimento del codice sorgente di Quay e delle immagini Docker
+
+    - name: Trasferimeto del codice sorgente di Quay
+      register: quay_transfer
+      ansible.builtin.copy:
+        src: deps/src/
+        dest: /home/admin/src/
+        force: no
+    - name: Estrazione dell'archivio del codice sorgente di Quay
+      when: quay_transfer.changed
+      ansible.builtin.shell: |
+        mkdir /home/admin/quay
+        tar -xvf /home/admin/src/quay.tar -C /home/admin/quay
+    - name: Sostituzione di {{ openssl_cnf_dns }} come SERVER_HOSTNAME
+      when: quay_transfer.changed
+      args:
+        chdir: /home/admin/quay
+      ansible.builtin.shell: |
+         sed -i 's\SERVER_HOSTNAME: quay.*\SERVER_HOSTNAME: {{ openssl_cnf_dns }}\g' local-dev/stack/config.yaml
+         sed -i 's\SERVER_HOSTNAME = "quay.*\SERVER_HOSTNAME = "{{ openssl_cnf_dns }}"\g' config.py
+    - name: Sostituzione di HTTPS come PREFERRED_URL_SCHEME 
+      when: quay_transfer.changed
+      args:
+        chdir: /home/admin/quay
+      ansible.builtin.shell: |
+         sed -i '/PREFERRED_URL_SCHEME:/c\PREFERRED_URL_SCHEME: https' local-dev/stack/config.yaml
+         sed -i '/PREFERRED_URL_SCHEME =/c\PREFERRED_URL_SCHEME = "https"' config.py
+    - name: Trasferimento delle immagini Docker
+      register: images_transfer
+      ansible.builtin.copy:
+        src: "{{ item }}"
+        dest: /home/admin/images/
+        force: no
+      loop:
+        - deps/images/quay-local.tar
+        - deps/images/quay-build.tar
+        - deps/images/clair.tar
+        - deps/images/redis.tar
+        - deps/images/postgres.tar
+    - name: Caricamento delle immagini Docker
+      when: images_transfer.changed
+      ansible.builtin.shell: |
+        docker load -i /home/admin/images/quay-local.tar
+        docker load -i /home/admin/images/quay-build.tar
+        docker load -i /home/admin/images/clair.tar
+        docker load -i /home/admin/images/redis.tar
+        docker load -i /home/admin/images/postgres.tar
+
+    # Configurazione di /etc/hosts per referenziare il nome di dominio localmente
+
+    - name: Verifica il contenuto di /etc/hosts
+      command: grep -Fxq "127.0.0.1 {{ openssl_cnf_dns }}" /etc/hosts
+      register: etc_hosts_contents
+      check_mode: no
+      ignore_errors: yes
+      changed_when: no
+      become: true
+    - name: Aggiunta di {{ openssl_cnf_dns }} in /etc/hosts
+      when: not etc_hosts_contents.rc == 0
+      become: true
+      ansible.builtin.shell: |
+        sh -c "echo 127.0.0.1 {{ openssl_cnf_dns }} >> /etc/hosts"
+
+    # Configurazione della CA locale, se necessaria
+
+    - name: Verifica dell'esistenza del file rootCA.pem
+      register: ca_status
+      ansible.builtin.stat:
+        path: /home/admin/tls/rootCA.pem
+    - name: Creazione della CA
+      when: not ca_status.stat.exists
+      ansible.builtin.shell: |
+        mkdir /home/admin/tls
+        openssl genrsa -out /home/admin/tls/rootCA.key 2048
+        openssl req -x509 -new -nodes -key /home/admin/tls/rootCA.key -sha256 -days 1024 -out /home/admin/tls/rootCA.pem -subj "/C=IE/ST=GALWAY/L=GALWAY/O=QUAY/OU=QUAY/CN={{ openssl_cnf_dns }}"
+
+    # Configurazione del certificato di Quay
+
+    - name: Trasferimento del file di configurazione di OpenSSL
+      ansible.builtin.copy:
+        src: "deps/tls/openssl.cnf"
+        dest: /home/admin/tls/
+        force: no
+    - name: Verifica DNS in deps/tls/openssl.cnf
+      command: grep -Fxq "DNS.1 = {{ openssl_cnf_dns }}" /home/admin/tls/openssl.cnf
+      register: openssl_cnf_dns_contents
+      check_mode: no
+      ignore_errors: yes
+      changed_when: no
+    - name: Verifica IP in di deps/tls/openssl.cnf
+      command: grep -Fxq "IP.1 = {{ openssl_cnf_ip }}" /home/admin/tls/openssl.cnf
+      register: openssl_cnf_ip_contents
+      check_mode: no
+      ignore_errors: yes
+      changed_when: no
+    - name: Aggiunta del DNS degli host nel file di configurazione di OpenSSL
+      when: not openssl_cnf_dns_contents.rc == 0
+      ansible.builtin.shell: |
+        sh -c "echo DNS.1 = {{ openssl_cnf_dns }} >> /home/admin/tls/openssl.cnf"
+    - name: Aggiunta dell'IP degli host nel file di configurazione di OpenSSL
+      when: not openssl_cnf_ip_contents.rc == 0
+      ansible.builtin.shell: |
+        sh -c "echo IP.1 = {{ openssl_cnf_ip }} >> /home/admin/tls/openssl.cnf"
+    - name: Generazione del certificato di Quay
+      ansible.builtin.shell: |
+        openssl genrsa -out /home/admin/tls/ssl.key 2048
+        openssl req -new -key /home/admin/tls/ssl.key -out /home/admin/tls/ssl.csr -subj "/C=IE/ST=GALWAY/L=GALWAY/O=QUAY/OU=QUAY/CN={{ openssl_cnf_dns }}"
+        openssl x509 -req -in /home/admin/tls/ssl.csr -CA /home/admin/tls/rootCA.pem -CAkey /home/admin/tls/rootCA.key -CAcreateserial -out /home/admin/tls/ssl.cert -days 356 -extensions v3_req -extfile /home/admin/tls/openssl.cnf
+    - name: Copia dei certificati nella repository locale di Quay
+      ansible.builtin.copy:
+        remote_src: true
+        mode: preserve
+        src: "{{ item }}"
+        dest: /home/admin/quay/local-dev/stack/
+        force: no
+      loop:
+        - /home/admin/tls/ssl.key
+        - /home/admin/tls/ssl.cert
+
+    # Esecuzione dei servizi di Quay
+
+    - name: Pruning di eventuali container pre-esistenti
+      ansible.builtin.shell: |
+        docker rm -vf quay-quay quay-db redis local-dev-frontend
+    - name: Esecuzione di local-dev-frontend
+      args:
+        chdir: /home/admin/quay
+      ansible.builtin.shell: |
+        DOCKER_USER="$(id -u):$(id -g)" docker-compose up -d local-dev-frontend
+    - name: Esecuzione di redis e quay-db
+      args:
+        chdir: /home/admin/quay
+      ansible.builtin.shell: |
+        docker-compose up -d redis quay-db
+    - name: Esecuzione di Quay
+      args:
+        chdir: /home/admin/quay
+      ansible.builtin.shell: |
+        DOCKER_USER="$(id -u):0" docker-compose up -d quay
+
+    # Restituisce il certificato della CA per debugging
+
+    - name: Output di rootCA.pem
+      ansible.builtin.fetch: 
+        src: /home/admin/tls/rootCA.pem
+        dest: outputs/
+        flat: yes

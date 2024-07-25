@@ -1,0 +1,5 @@
+quay_nodes:
+    hosts:
+      node01:
+        ansible_host: 192.168.56.102
+        domain_name: quay.local
