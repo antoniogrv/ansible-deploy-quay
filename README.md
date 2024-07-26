@@ -57,13 +57,16 @@ git clone https://organization/repository.git
 cd repository
 ```
 
-6. Modificare il file `inventory.yaml`, sostituendo a `x.y.z.k` l'indirizzo IP della macchina virtuale target.
-
-7. Scaricare la dipendenze ed estrarre l'archivio.
+6. [Scaricare la dipendenze della propria release di riferimento](https://github.com/antoniogrv/quay-dev-playbook/releases), spostare i `.tar` nella root directory della repository appena clonata, ed eseguire il seguente script.
 ```bash
-wget https://organization/repository/releases/download.tar
-tar -xvf download.tar -C deps
+mv quay.tar deps/src
+mv quay-local.tar quay-build.tar redis.tar postgres.tar clair.tar deps/images
+tar -xvf tls.tar -C deps
+tar -xvf docker.tar -C deps
+rm tls.tar docker.tar
 ```
+
+7. Modificare il file `inventory.yaml`, sostituendo a `x.y.z.k` l'indirizzo IP della macchina virtuale target.
 
 8. Eseguire `ansible-playbook -i inventory.yaml --ask-become setup-quay-registry.yaml`. All'esecuzione, immettere la password dell'utente `admin`.
 
