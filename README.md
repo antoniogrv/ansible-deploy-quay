@@ -53,8 +53,8 @@ conda install -c conda-forge ansible
 
 5. Clonare questa repository ed accedervi.
 ```bash
-git clone https://organization/repository.git
-cd repository
+git clone git@github.com:antoniogrv/quay-offline-playbook.git
+cd quay-offline-playbook
 ```
 
 6. [Scaricare la dipendenze della propria release di riferimento](https://github.com/antoniogrv/quay-dev-playbook/releases), spostare i `.tar` nella root directory della repository appena clonata, ed eseguire il seguente script.
